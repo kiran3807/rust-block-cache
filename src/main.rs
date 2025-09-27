@@ -1,16 +1,11 @@
 
-#[tokio::main]
-async fn main() {
+use rust_block_cache::{BlockCache};
+
+fn main() {
     println!("Hello, async world!");
-    
-    // Example async operation
-    let result = async_task().await;
-    println!("Result: {}", result);
 
-}
-
-
-async fn async_task() -> String {
-    tokio::time::sleep(tokio::time::Duration::from_millis(1200)).await;
-    "Task completed".to_string()
+    // Example usage of BlockCache
+    let cache = BlockCache::new("test.dat");
+    let block = cache.get_block("127.0.0.1", "Mozilla/5.0");
+    println!("Block: {}", block);
 }

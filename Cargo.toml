@@ -3,5 +3,11 @@ name = "rust-block-cache"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "rust_block_cache"
+
+[[bin]]
+name = "example"
+path = "src/main.rs"
+
 [dependencies]
-tokio = { version = "1.0", features = ["full"] }
