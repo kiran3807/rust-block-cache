@@ -10,6 +10,8 @@ use timer::Timer;
 use chrono::Duration;
 use indexmap::IndexSet;
 use arc_swap::ArcSwap;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 
 pub mod constants;
 
@@ -23,6 +25,7 @@ pub struct CacheData {
 
 pub struct BlockCache {
     cache_data: Arc<ArcSwap<CacheData>>, // All data wrapped in ArcSwap for lock-free reads
+    lru_cache: Arc<Mutex<LruCache<String, String>>>, // LRU cache for get_block optimization
     _guard: Arc<Mutex<Option<timer::Guard>>> // Keep timer alive
 }
 
@@ -36,6 +39,9 @@ impl BlockCache {
         };
         
         let cache_data = Arc::new(ArcSwap::new(Arc::new(initial_data)));
+        let lru_cache = Arc::new(Mutex::new(
+            LruCache::new(NonZeroUsize::new(constants::LRU_CACHE_SIZE).unwrap())
+        ));
         let guard_holder = Arc::new(Mutex::new(None));
         
         // Clone for timer callback
@@ -56,6 +62,7 @@ impl BlockCache {
         
         BlockCache {
             cache_data,
+            lru_cache,
             _guard: guard_holder,
         }
     }
@@ -141,38 +148,63 @@ impl BlockCache {
     }
 
     pub fn get_block(&self, ip: &str, user_agent: &str) -> Result<String, String> {
+        // Generate cache key from parameters
+        let cache_key = format!("{}|{}", ip, user_agent);
+        
+        // Check LRU cache first
+        {
+            let mut lru = self.lru_cache.lock().unwrap();
+            if let Some(cached_value) = lru.get(&cache_key) {
+                return Ok(cached_value.clone()); // Cache hit - return immediately
+            }
+        }
+        
+        // Cache miss - proceed with existing implementation
         // Load current cache data snapshot
         let cache = self.cache_data.load();
         
         // Step 1: Check if IP exists in the IP set
         let ip_index = match cache.ip_set.get_index_of(ip) {
             Some(index) => index,
-            None => return Ok("0".to_string()), // IP not found, return 0 immediately
+            None => return Ok("0".to_string()), // IP not found, return 0 immediately (don't cache)
         };
         
         // Step 2: Check if there's a single IP index entry in the hashmap
         let ip_only_key = ip_index as u64;
         if let Some(value) = cache.block_map.get(&ip_only_key) {
-            return Ok(value.clone()); // Found single IP entry, return its value
+            // Found single IP entry - cache it before returning
+            {
+                let mut lru = self.lru_cache.lock().unwrap();
+                lru.put(cache_key, value.clone());
+            }
+            return Ok(value.clone());
         }
         
         // Step 3: Check if user agent exists in the user agent set
         let ua_index = match cache.user_agent_set.get_index_of(user_agent) {
             Some(index) => index,
-            None => return Ok("0".to_string()), // User agent not found, return 0 immediately
+            None => return Ok("0".to_string()), // User agent not found, return 0 immediately (don't cache)
         };
         
         // Step 4: Create combined key and search for it
         let combined_key = ((ip_index as u64) << 32) | (ua_index as u64);
         match cache.block_map.get(&combined_key) {
-            Some(value) => Ok(value.clone()), // Found combined entry, return its value
+            Some(value) => {
+                // Found combined entry - cache it before returning
+                {
+                    let mut lru = self.lru_cache.lock().unwrap();
+                    lru.put(cache_key, value.clone());
+                }
+                Ok(value.clone())
+            },
             None => Err(format!(
                 "Anomalous state: IP '{}' (index {}) and User Agent '{}' (index {}) exist in sets but combined key {} not found in hashmap",
                 ip, ip_index, user_agent, ua_index, combined_key
-            )), // This should not happen - anomalous state
+            )), // This should not happen - anomalous state (don't cache errors)
         }
     }
     
+    // debugging function 
     pub fn print_cache_contents(&self) {
         // Load current cache data snapshot (lock-free read!)
         let cache = self.cache_data.load();
@@ -233,4 +265,5 @@ impl BlockCache {
         
         println!("\n==========================");
     }
+    
 }
