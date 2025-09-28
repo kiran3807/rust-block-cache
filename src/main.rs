@@ -1,14 +1,15 @@
-
-use rust_block_cache::{BlockCache, foo, bar, koo};
+use rust_block_cache::{BlockCache};
+use std::thread;
+use std::time::Duration;
 
 fn main() {
-    // println!("Hello, async world!");
-
-    // // Example usage of BlockCache
-    // let cache = BlockCache::new("test.dat");
-    // let block = cache.get_block("127.0.0.1", "Mozilla/5.0");
-    // println!("Block: {}", block);
-    // bar();
-    koo();
-    println!("done");
+    let cache = BlockCache::new("sample_block_file.txt");
+    
+    println!("Press Ctrl+C to exit...");
+    
+    // Keep program running until user interrupts
+    loop {
+        thread::sleep(Duration::from_secs(7));
+        cache.print_cache_contents();
+    }
 }
