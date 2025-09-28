@@ -8,6 +8,9 @@ fn main() {
     // Wait a moment for initial load
     thread::sleep(Duration::from_secs(1));
 
+    println!("Initial cache contents:");
+    cache.print_lru_cache_contents();
+
     println!("-----Testing get_block functionality-----\n");
     
     let test_cases = vec![
@@ -40,57 +43,8 @@ fn main() {
         println!();
     }
     
+    print!("Cache contents after get_block tests:");
+    cache.print_lru_cache_contents();
     println!("----Test completed-----\n");
 
-    // println!("----Testing LRU Cache with get_block----\n");
-    // let test_case = ("10.0.0.1", "curl");
-    
-    // println!("First call - should populate LRU cache:");
-    // println!("get_block('{}', '{}')", test_case.0, test_case.1);
-    // match cache.get_block(test_case.0, test_case.1) {
-    //     Ok(value) => {
-    //         if value == "0" {
-    //             println!("  Result: Not found (returned '0')");
-    //         } else {
-    //             println!("  Result: Found value = '{}' (cached for next time)", value);
-    //         }
-    //     }
-    //     Err(error) => {
-    //         println!("  Result: ERROR - {}", error);
-    //     }
-    // }
-    
-    // println!("\nSecond call - should hit LRU cache:");
-    // println!("get_block('{}', '{}')", test_case.0, test_case.1);
-    // match cache.get_block(test_case.0, test_case.1) {
-    //     Ok(value) => {
-    //         if value == "0" {
-    //             println!("  Result: Not found (returned '0')");
-    //         } else {
-    //             println!("  Result: Found value = '{}' (from LRU cache!)", value);
-    //         }
-    //     }
-    //     Err(error) => {
-    //         println!("  Result: ERROR - {}", error);
-    //     }
-    // }
-    
-    // println!("\nThird call - should also hit LRU cache:");
-    // println!("get_block('{}', '{}')", test_case.0, test_case.1);
-    // match cache.get_block(test_case.0, test_case.1) {
-    //     Ok(value) => {
-    //         if value == "0" {
-    //             println!("  Result: Not found (returned '0')");
-    //         } else {
-    //             println!("  Result: Found value = '{}' (from LRU cache!)", value);
-    //         }
-    //     }
-    //     Err(error) => {
-    //         println!("  Result: ERROR - {}", error);
-    //     }
-    // }
-    
-    // println!("\n----LRU Cache Test Completed-----");
-    // println!("If the same value was returned all three times,");
-    // println!("the LRU cache is working correctly!");
 }

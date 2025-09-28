@@ -17,7 +17,7 @@ pub mod constants;
 
 // Struct to hold all cache data together for atomic updates
 #[derive(Clone)]
-pub struct CacheData {
+struct CacheData {
     pub block_map: HashMap<u64, String>, // Key: combined numeric key -> Value: second field
     pub ip_set: IndexSet<String>, // All unique IP addresses
     pub user_agent_set: IndexSet<String>, // All unique User Agents
@@ -87,6 +87,8 @@ impl BlockCache {
         
         loop {
             buffer.clear();
+            // Reuse existing buffer to avoid allocations via the read_line method
+            // for minor speed improvement
             match reader.read_line(&mut buffer) {
                 Ok(0) => break, // EOF
                 Ok(_) => {
@@ -264,6 +266,32 @@ impl BlockCache {
         }
         
         println!("\n==========================");
+    }
+    
+    // debugging function 
+    pub fn print_lru_cache_contents(&self) {
+        let lru = self.lru_cache.lock().unwrap();
+        
+        println!("--- LRU Contents ---");
+        println!("LRU Capacity: {} entries", lru.cap());
+        println!("LRU Size: {} entries", lru.len());
+        println!();
+        
+        if lru.len() == 0 {
+            println!("LRU is empty");
+        } else {
+            println!("Cached Entries (Most Recent First):");
+            println!("   Cache Key (IP|UserAgent) | Cached Value");
+            println!("   --------------------------|-------------");
+            
+            // LRU crate doesn't provide direct iteration over entries
+            // So we'll show basic stats and indicate that entries exist
+            for (index, (key, value)) in lru.iter().enumerate() {
+                println!("   {:2}. {} | {}", index + 1, key, value);
+            }
+        }
+        
+        println!("\n--------------------------");
     }
     
 }

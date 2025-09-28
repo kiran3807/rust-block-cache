@@ -62,7 +62,7 @@ Which implies in memory at worst it would not exceed 700MB where I assume the sp
 
 The basic idea is that given the constraints pertaining to *the volume of data* and *low latency reads* an in-memory HashMap continues to be the fastest ways `get_block` function calls can be serviced. 
 
-Expecially in context of the fact that The SipHash function used by Rust in it's HashMap implementation even with million entries can be demonstrated to have a low probability of collision.
+Expecially in context of the fact that The SipHash function used by Rust in it's HashMap(also by IndexHash crate from which I import IndexSet) implementation even with million entries can be demonstrated to have a low probability of collision.
 
 From the Birthday problem, used to calculate probability of collisions:
 
@@ -71,15 +71,15 @@ From the Birthday problem, used to calculate probability of collisions:
 
 M=64 since SipHash is 64 bit hash and for n = 1000000, we get 2.7×10−6 as the probability of collisions.
 
-The issue with HashMaps is that it does lend itself to cache locality and that can cause problems especially when the size of the data is enough to stress the capacity of memory, causing the OS to start paging, which can lead to the problem of thrashing.
+The issue with HashMaps is that it does not lend itself to cache locality and that can cause problems especially when the size of the data is enough to stress the capacity of RAM, causing the OS to start paging, which can lead to the problem of thrashing.
 
 Secondly to ensure low latency of reads we have to for certain period of time maintain two data-sets within memory, the older one that is being used to service requests while the newer one is being constructed corresponding to the updated block-file( which is updated every 5 seconds) before it can be completely replace the older data.
 
 Which means it is very important to reduce the memory foot print both for the reasons :
 
-* of ensuring there is no thrashing happens due to page swaps, when we consider the fact that HashMaps have bad cache locality
+* of ensuring there is no thrashing happens due to page swaps, especially in context of the fact that HashMaps have bad cache locality.
 
-* and ensure the newer data can efficiently replace the older one with minimal disruption.
+* and ensure the newer data can efficiently replace the older one with minimal disruption. This includes reducing the time taken to rebuild the hashes once new data comes in, apart from reading in the block-file data from the file.
 
 
 ### Data patterns :
@@ -90,14 +90,20 @@ Within the examples for the block file provided within the problem statement, we
 * The possibility of the same user agent being repeated in context of different IP addresses.
 
 
-Therefore I maintain two IndexSets( found within : https://crates.io/crates/indexmap ) one corresponding to IP address and the other corresponding to User agent.
+### Optimization - 1 : 
+
+Therefore I maintain two IndexSets(https://crates.io/crates/indexmap ) one corresponding to IP address and the other corresponding to User agent.
 
 I then construct a tuple key consisting of the unique indexes each measuring 4 bytes each of the IP addresses and User agents in the above IndexSets and map it to the fine grained block associated with it. So HashMap where the actual mapping happens has very low memory footprint.
 
-At best the worst case memory complexity is when we have utterly unique IP address and user agent combinations in every line of the block-file and memory occupied is marginally larger than what I would have had if I used a simple HashMap. But this comes with the advantage of a reduced memory foot print and performance for the average case.
+At best the worst case memory complexity is when we have utterly unique IP address and user agent combinations in every line of the block-file and therefore the memory complexity is marginally larger than what I would have had if I used a simple HashMap. 
 
-It also gives minor speed improvements as within the HashMap where we store the mapping between ips, user agents and fine grained blocks, the keys are small in size and hence can be hashed faster.
+But this comes with the advantage of a reduced memory foot print and performance for the average case, where we assume there will be lot of repitition within IP addresses and user agents.
 
+It also allows for minor speed improvements as within the HashMap where we store the mapping between ips, user agents and fine grained blocks, the keys are now much small in size and hence can be hashed faster.
 
+### Optimization - 2 : 
+
+However in certain cases we cannot avoid the worst case memory complexity and stressing the memory of the edge services. So to avoid thrashing and to *further boost read latency in general*, we place a LRU cache within the get_block functionality that gaurds the access to the actual logic.
 
 
