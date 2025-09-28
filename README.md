@@ -99,7 +99,7 @@ It also allows for minor speed improvements as within the HashMap where we store
 
 ### Optimization - 2 : 
 
-However in certain cases we cannot avoid the worst case memory complexity and stressing the memory of the edge services. So to avoid thrashing and to *further boost read latency in general*, we place a LRU cache within the get_block functionality that gaurds the access to the actual logic.
+As the problem statement demands that we optimise for read latency,  we place a LRU cache within the `get_block` functionality that gaurds the access to the implementation.
 
 ## Going further :
 
