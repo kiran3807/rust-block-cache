@@ -1,5 +1,5 @@
 
-use rust_block_cache::{BlockCache, foo, bar};
+use rust_block_cache::{BlockCache, foo, bar, koo};
 
 fn main() {
     // println!("Hello, async world!");
@@ -9,6 +9,6 @@ fn main() {
     // let block = cache.get_block("127.0.0.1", "Mozilla/5.0");
     // println!("Block: {}", block);
     // bar();
-    foo();
+    koo();
     println!("done");
 }

@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use timer::Timer;
 use chrono::Duration;
+use indexmap::IndexSet;
 
 pub mod constants;
 
@@ -28,7 +29,46 @@ impl BlockCache {
     }
 }
 
-pub fn foo() {
+pub fn koo() {
+    let mut ip_set = IndexSet::new();
+    
+    let file = match File::open("sample_block_file.txt") {
+        Ok(file) => file,
+        Err(err) => {
+            println!("Error opening file: {}", err);
+            return;
+        }
+    };
+    
+    let mut reader = BufReader::new(file);
+    let mut buffer = String::new();
+    
+    loop {
+        buffer.clear();
+        match reader.read_line(&mut buffer) {
+            Ok(0) => break, // EOF reached
+            Ok(_) => {
+                let parts: Vec<&str> = buffer.trim().split(',').collect();
+                
+                // Extract IP address (first field in CSV)
+                if let Some(ip) = parts.get(0) {
+                    ip_set.insert(ip.to_string());
+                }
+            }
+            Err(err) => {
+                println!("Error reading line: {}", err);
+                break;
+            }
+        }
+    }
+    
+    // Print the collected IP addresses
+    println!("Unique IP addresses found:");
+    for (index, ip) in ip_set.iter().enumerate() {
+        println!("  {}: {}", index + 1, ip);
+    }
+    println!("Total unique IPs: {}", ip_set.len());
+}pub fn foo() {
     let timer = Timer::new();
 
     // Schedule a repeating callback every 250 ms
