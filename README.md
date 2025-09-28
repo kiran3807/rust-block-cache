@@ -54,7 +54,7 @@ a UTF-8 character is typically 4 bytes at max,
 
 Total = 344 bytes or 350 bytes rounded.
 
-Which implies in memory at worst it would not exceed 700MB where I assume the specifics of the data structure might cause it occupy at worst twice the size as the original 350 MB(350 * 1000000). It within the capabilities of modern devices, however certain edge devices with low memory provisions(less than 2GB) may struggle with thrashing as OS might start triggering page swaps
+Which implies in memory at worst it would not exceed 700MB where I assume the specifics of the data structure might cause it occupy at worst twice the size as the original 350 MB(350 * 1000000). It is within the capabilities of modern devices, however certain edge devices with low memory provisions(less than 2GB) may struggle with thrashing as OS might start triggering page swaps
 
 
 
