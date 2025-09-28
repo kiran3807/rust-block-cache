@@ -13,7 +13,7 @@ signature:*
 
 as to mean, that I am to expose the block cache as a **library** for external use, whether within a service or otherwise.
 
-Hence I make no assumptions about the run times in which the library may be used. Which rules out the usage of tokio for async operations within the library.
+Hence I make no assumptions about the envrionment within which the library may be used. Which for instance rules out the usage of tokio for async operations within the library.
 
 An alternative implementation could be to abstract the block-cache as another mircoservice with it's own IP address which other services access either through a REST/RPC end points.
 
@@ -21,22 +21,68 @@ An alternative implementation could be to abstract the block-cache as another mi
 
 * If you have a IP-address and user agent combination occouring twice with different fine grained blocks, the latest entry within the block file wins.
 
+* Similarly if we have a IP address, fine grained block combination that occours more than once the latest entry wins
+
 * You can never have an entry where there is only user-agent, or just user-agent and fine grained block combination. The broadest block that can be applied exists only on IP level.
 
-### Data access patterns :
+### Data access patterns and Memory requirements :
 
 * **High reads** for ```get_blocks``` with short payloads  : 5k reads per second, 20k peak
 * **Low volume** of reads for the reading blockfile with a significant larger payload every 5 seconds.
 
 **Number of reads** : This based on the fact that typical enterprise points of presence often handle 100k requests /second or more however it is distributed over multiple services. Hence 5k as lower limit and 20k as upper limit.
 
-**Size of the blockfile** : Based on assumption that edge nodes/caches typically favour data-structures that can be fit within the memory without taxing the node, I assume it's max size will shoot up to a million rows, with 50-100bytes per line. 
+**Size of the blockfile** : Based on assumption that edge nodes/caches typically favour data-structures that can be fit within the memory without taxing the node, I assume it's max size will shoot up to a million rows, with 160 bytes per line at most. 
 
-Which implies in memory at worst it would not exceed 400-500MB and thus can be handled by modern devices.
+Here is the breakdown of 160 bytes estimate:
+
+Each line consists of atmost:
+* IP Address,
+* Fine grained block
+* User-Agent
+
+*We can have multiple user agents associated with a single IP, however I consider each IP and user agent combination as a unique entry*
+
+a UTF-8 character is typically 4 bytes at max, 
+
+* IP address, consisting of 15 characters = 15*4 = 60bytes
+* The largest user agent, as seen in the sample_block_file.txt, is about 520 bytes and the smallest is 16 bytes, thus average size would be: 268 bytes
+* fine grained block is a single digit hence 4 bytes
+* 3 commas which amount 3*4 = 12 bytes
+
+Total = 344 bytes or 350 bytes rounded.
+
+Which implies in memory at worst it would not exceed 700MB where I assume the specifics of the data structure might cause it occupy at worst twice the size as the original 350 MB(350 * 1000000). It within the capabilities of modern devices, however certain edge devices with low memory provisions(less than 2GB) may struggle with thrashing as OS might start triggering page swaps
 
 
 
 ## Solution : 
+
+The basic idea is that given the data constraints an in-memory HashMap continues to be the fastest ways `get_block` function calls can be serviced. 
+
+Also to ensure low latency of reads we have to for certain period of time maintain two data-sets within memory, the older one that is being used to service requests while the newer one is being constructed corresponding to the updated block-file( which is updated every 5 seconds) before it can be completely replace the older data.
+
+Which means it is very important to reduce the memory foot print both for the reasons :
+
+* of ensuring there is no thrashing happens due to page swaps, when we consider the fact that HashMaps have bad cache locality
+
+* and ensure the newer data can efficiently replace the older one with minimal disruption.
+
+
+### Data patterns :
+
+Within the examples for the block file provided within the problem statement, we observe that:
+
+* You can have the same IP address repeated in context of different user agents
+* The possibility of the same user agent being repeated in context of different IP addresses.
+
+
+Therefore I maintain two IndexSets( found within : https://crates.io/crates/indexmap ) one corresponding to IP address and the other corresponding to User agent.
+
+I then construct a tuple key consisting of the unique indexes each measuring 4 bytes each of the IP addresses and User agents in the above IndexSets and map it to the fine grained block associated with it. So HashMap where the actual mapping happens has very low memory footprint.
+
+At best the worst case memory complexity is when we have utterly unique IP address and user agent combinations in every line of the block-file and memory occupied is marginally larger than what I would have had if I used a simple HashMap. But this comes with the advantage of a reduced memory foot print and performance for the average case.
+
 
 A library crate that will expose the struct BlockCache with methods, start and get_block.
 
