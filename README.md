@@ -53,9 +53,9 @@ a UTF-8 character is typically 4 bytes at max,
 
 Total = 344 bytes or 350 bytes rounded per line of the block-file
 
-Which implies in memory at worst it would not exceed 700MB where I assume the specifics of the data structure storing the data might cause it occupy at worst twice the volume as the original 350 MB(350 * 1000000). 
+Which implies in memory at worst it would not exceed 700MB where I assume the specifics of the data structure storing the data might cause it occupy pessimistically twice the volume as the original 350 MB(350 * 1000000). 
 
-While it is within the capabilities of modern devices, however certain edge devices with low memory provisions(less than 2GB) may struggle with thrashing as OS might start triggering page swaps
+While it is within the capabilities of modern devices, however certain edge devices with low memory provisions(less than 2GB) may struggle with thrashing as OS triggers page swaps
 
 
 
@@ -72,15 +72,9 @@ From the Birthday problem, used to calculate probability of collisions:
 
 M=64 since SipHash is 64 bit hash and for n = 1000000, we get 2.7×10−6 as the probability of collisions.
 
-The issue with HashMaps is that it does not lend itself to cache locality and that can cause problems especially when the size of the data is enough to stress the capacity of RAM, causing the OS to start paging, which can lead to the problem of thrashing.
+Secondly to ensure low latency of reads we have to for atleast a certain period of time maintain two data-sets within memory, the older one that is being used to service requests while the newer one is being constructed corresponding to the updated block-file( which is updated every 5 seconds) before it can be completely replace the older data.
 
-Secondly to ensure low latency of reads we have to for certain period of time maintain two data-sets within memory, the older one that is being used to service requests while the newer one is being constructed corresponding to the updated block-file( which is updated every 5 seconds) before it can be completely replace the older data.
-
-Which means it is very important to reduce the memory foot print for the reasons of :
-
-* of ensuring there is no thrashing happens due to page swaps, especially in context of the fact that HashMaps have bad cache locality.
-
-* and ensure the newer data can efficiently replace the older one with minimal disruption. This includes reducing the time taken to rebuild the hashes once new data comes in, apart from reading in the block-file data from the file.
+Which only underlines the need reduce memory foot print of the data-structures holding the block-file data, not only because at some point memory holds data associated with two blockfiles, but constructing the data-structures to hold the new block-file data, is time consuming and should not be consuming the better part of the 5 second interval after which the block-files is updated.
 
 
 ### Data patterns :
@@ -109,6 +103,8 @@ However in certain cases we cannot avoid the worst case memory complexity and st
 
 ## Going further :
 
+### Bloom Filters : 
+
 In general if we assume 80-60 percent of requests made to a given node are not malicious, we can ensure our logic is only restricted to the greater subset of malicious requests by the means of a bloom filter.
 
 Bloom filter is capable of, with greatly reduced memory footprint and high speed figuring out if a given IP address has any sort of block associated with it.
@@ -116,5 +112,12 @@ Bloom filter is capable of, with greatly reduced memory footprint and high speed
 We simply have to query if the incoming IP address is not present within the ip addresses stored by the bloom filter. If the answer is negative that means there is neither a IP level fine block or IP-user agent-fine block entry within the block-file.
 
 Hence we can return 0 there itself, allowing the IP to pass.
+
+
+### Btree Maps :
+
+As mentioned previously for a certain time period the memory holds data associated with two different block-files, straining the memory of low spec edge devices. HashMap performance often degrades in such contexts on account of thrashing due to the page swaps the initiated by the OS.
+
+This is due to lack of cache locality in HashMaps. In that case we can use BtreeMaps, where we sacrifice o(1) lookup for log(n) lookup in return for much better cache locality, preventing thrashing caused by OS page swaps.
 
 
