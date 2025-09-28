@@ -13,4 +13,5 @@ path = "src/main.rs"
 [dependencies]
 chrono = "0.4.42"
 indexmap = "2.11.4"
+arc-swap = "1.7"
 timer = "0.2.0"

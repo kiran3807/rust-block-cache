@@ -2,64 +2,68 @@ extern crate timer;
 extern crate chrono;
 
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration as StdDuration;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::collections::HashMap;
 
 use timer::Timer;
 use chrono::Duration;
 use indexmap::IndexSet;
+use arc_swap::ArcSwap;
 
 pub mod constants;
 
+// Struct to hold all cache data together for atomic updates
+#[derive(Clone)]
+pub struct CacheData {
+    pub block_map: HashMap<u64, String>, // Key: combined numeric key -> Value: second field
+    pub ip_set: IndexSet<String>, // All unique IP addresses
+    pub user_agent_set: IndexSet<String>, // All unique User Agents
+}
+
 pub struct BlockCache {
-    block_map: Arc<Mutex<HashMap<u64, String>>>, // Key: combined numeric key -> Value: second field
-    ip_set: Arc<Mutex<IndexSet<String>>>, // All unique IP addresses
-    user_agent_set: Arc<Mutex<IndexSet<String>>>, // All unique User Agents
+    cache_data: Arc<ArcSwap<CacheData>>, // All data wrapped in ArcSwap for lock-free reads
     _guard: Arc<Mutex<Option<timer::Guard>>> // Keep timer alive
 }
 
 impl BlockCache {
     pub fn new(block_file_name: &str) -> Self {
-        let block_map = Arc::new(Mutex::new(HashMap::new()));
-        let ip_set = Arc::new(Mutex::new(IndexSet::new()));
-        let user_agent_set = Arc::new(Mutex::new(IndexSet::new()));
+        // Create initial empty cache data
+        let initial_data = CacheData {
+            block_map: HashMap::new(),
+            ip_set: IndexSet::new(),
+            user_agent_set: IndexSet::new(),
+        };
+        
+        let cache_data = Arc::new(ArcSwap::new(Arc::new(initial_data)));
         let guard_holder = Arc::new(Mutex::new(None));
         
-        // Clone references for the timer callback
-        let block_map_clone = Arc::clone(&block_map);
-        let ip_set_clone = Arc::clone(&ip_set);
-        let user_agent_set_clone = Arc::clone(&user_agent_set);
+        // Clone for timer callback
+        let cache_data_clone = Arc::clone(&cache_data);
         let file_name = block_file_name.to_string();
         
         let timer = Timer::new();
         let guard = timer.schedule_repeating(Duration::milliseconds(5000), move || {
-            // Update HashMap and IndexSets every 5 seconds
-            Self::update_collections(&block_map_clone, &ip_set_clone, &user_agent_set_clone, &file_name);
+            // Update all collections every 5 seconds
+            Self::update_collections(&cache_data_clone, &file_name);
         });
         
         // Store the guard to keep timer alive
         *guard_holder.lock().unwrap() = Some(guard);
         
         // Initial load
-        Self::update_collections(&block_map, &ip_set, &user_agent_set, block_file_name);
+        Self::update_collections(&cache_data, block_file_name);
         
         BlockCache {
-            block_map,
-            ip_set,
-            user_agent_set,
+            cache_data,
             _guard: guard_holder,
         }
     }
     
-    fn update_collections(
-        block_map: &Arc<Mutex<HashMap<u64, String>>>, 
-        ip_set: &Arc<Mutex<IndexSet<String>>>,
-        user_agent_set: &Arc<Mutex<IndexSet<String>>>,
-        file_name: &str
-    ) {
+    fn update_collections(cache_data: &Arc<ArcSwap<CacheData>>, file_name: &str) {
+        println!("Updating collections from file: {}", file_name);
+        let _ = io::stdout().flush();
+        
         let file = match File::open(file_name) {
             Ok(file) => file,
             Err(err) => {
@@ -116,101 +120,111 @@ impl BlockCache {
             }
         }
         
-        // Update all shared collections
-        let mut map = block_map.lock().unwrap();
-        let mut ips = ip_set.lock().unwrap();
-        let mut user_agents = user_agent_set.lock().unwrap();
+        // Get sizes before moving into Arc
+        let ip_count = new_ip_set.len();
+        let user_agent_count = new_user_agent_set.len();
+        let mapping_count = new_map.len();
         
-        *map = new_map;
-        *ips = new_ip_set;
-        *user_agents = new_user_agent_set;
+        // Create new cache data instance
+        let new_cache = Arc::new(CacheData {
+            block_map: new_map,
+            ip_set: new_ip_set,
+            user_agent_set: new_user_agent_set,
+        });
+        
+        // Atomically update with new data
+        cache_data.store(new_cache);
         
         println!("Updated collections: {} IPs, {} User Agents, {} mappings", 
-                 ips.len(), user_agents.len(), map.len());
+                 ip_count, user_agent_count, mapping_count);
+        let _ = io::stdout().flush();
     }
 
-    pub fn get_block(&self, ip: &str, user_agent: &str) -> u32 {
-        let map = self.block_map.lock().unwrap();
-        let ips = self.ip_set.lock().unwrap();
-        let user_agents = self.user_agent_set.lock().unwrap();
+    pub fn get_block(&self, ip: &str, user_agent: &str) -> Result<String, String> {
+        // Load current cache data snapshot
+        let cache = self.cache_data.load();
         
-        // Find IP index in IndexSet
-        let ip_index = match ips.get_index_of(ip) {
+        // Step 1: Check if IP exists in the IP set
+        let ip_index = match cache.ip_set.get_index_of(ip) {
             Some(index) => index,
-            None => return 0, // IP not found in IndexSet
+            None => return Ok("0".to_string()), // IP not found, return 0 immediately
         };
         
-        // Try to find the key
-        let key = if !user_agent.is_empty() {
-            // Try to find user agent index
-            if let Some(ua_index) = user_agents.get_index_of(user_agent) {
-                ((ip_index as u64) << 32) | (ua_index as u64)
-            } else {
-                return 0; // User agent not found
-            }
-        } else {
-            ip_index as u64
+        // Step 2: Check if there's a single IP index entry in the hashmap
+        let ip_only_key = ip_index as u64;
+        if let Some(value) = cache.block_map.get(&ip_only_key) {
+            return Ok(value.clone()); // Found single IP entry, return its value
+        }
+        
+        // Step 3: Check if user agent exists in the user agent set
+        let ua_index = match cache.user_agent_set.get_index_of(user_agent) {
+            Some(index) => index,
+            None => return Ok("0".to_string()), // User agent not found, return 0 immediately
         };
         
-        match map.get(&key) {
-            Some(_) => 1, // Match found
-            None => 0,    // Not found
+        // Step 4: Create combined key and search for it
+        let combined_key = ((ip_index as u64) << 32) | (ua_index as u64);
+        match cache.block_map.get(&combined_key) {
+            Some(value) => Ok(value.clone()), // Found combined entry, return its value
+            None => Err(format!(
+                "Anomalous state: IP '{}' (index {}) and User Agent '{}' (index {}) exist in sets but combined key {} not found in hashmap",
+                ip, ip_index, user_agent, ua_index, combined_key
+            )), // This should not happen - anomalous state
         }
     }
     
     pub fn print_cache_contents(&self) {
-        let map = self.block_map.lock().unwrap();
-        let ips = self.ip_set.lock().unwrap();
-        let user_agents = self.user_agent_set.lock().unwrap();
+        // Load current cache data snapshot (lock-free read!)
+        let cache = self.cache_data.load();
         
         println!("=== BlockCache Contents ===");
         
         // Print IP IndexSet separately
-        println!("\n1. IP Address IndexSet ({} entries):", ips.len());
+        println!("\n1. IP Address IndexSet ({} entries):", cache.ip_set.len());
         println!("   Index | IP Address");
         println!("   ------|----------");
-        if ips.is_empty() {
+        if cache.ip_set.is_empty() {
             println!("   (empty)");
         } else {
-            for (index, ip) in ips.iter().enumerate() {
+            for (index, ip) in cache.ip_set.iter().enumerate() {
                 println!("   {:5} | {}", index, ip);
             }
         }
         
         // Print User Agent IndexSet separately
-        println!("\n2. User Agent IndexSet ({} entries):", user_agents.len());
+        println!("\n2. User Agent IndexSet ({} entries):", cache.user_agent_set.len());
         println!("   Index | User Agent");
         println!("   ------|----------");
-        if user_agents.is_empty() {
+        if cache.user_agent_set.is_empty() {
             println!("   (empty)");
         } else {
-            for (index, user_agent) in user_agents.iter().enumerate() {
+            for (index, user_agent) in cache.user_agent_set.iter().enumerate() {
                 println!("   {:5} | {}", index, user_agent);
             }
         }
         
         // Print HashMap separately
-        println!("\n3. HashMap - Index-based Key Mappings ({} entries):", map.len());
+        println!("\n3. HashMap - Index-based Key Mappings ({} entries):", cache.block_map.len());
         println!("   Numeric Key | Decoded Key | Second Field");
         println!("   ------------|-------------|-------------");
-        if map.is_empty() {
+        if cache.block_map.is_empty() {
             println!("   (empty)");
         } else {
-            for (key, second_field) in map.iter() {
+            for (key, second_field) in cache.block_map.iter() {
                 let ip_index = (key >> 32) as usize;
                 let ua_index = (key & 0xFFFFFFFF) as usize;
                 
                 if ua_index == 0 && ip_index == (*key as usize) {
                     // IP index only key
                     let invalid_ip = "INVALID".to_string();
-                    let ip_addr = ips.get_index(ip_index).unwrap_or(&invalid_ip);
+                    let ip_addr = cache.ip_set.get_index(ip_index).unwrap_or(&invalid_ip);
                     println!("   {:11} | IP_idx: {} ({}) | {}", key, ip_index, ip_addr, second_field);
                 } else {
                     // Combined key (IP index + UA index)
                     let invalid_ip = "INVALID".to_string();
                     let invalid_ua = "INVALID".to_string();
-                    let ip_addr = ips.get_index(ip_index).unwrap_or(&invalid_ip);
-                    let ua_str = user_agents.get_index(ua_index).unwrap_or(&invalid_ua);
+                    let ip_addr = cache.ip_set.get_index(ip_index).unwrap_or(&invalid_ip);
+                    let ua_str = cache.user_agent_set.get_index(ua_index).unwrap_or(&invalid_ua);
                     println!("   {:11} | IP_idx: {} ({}), UA_idx: {} ({}) | {}", 
                              key, ip_index, ip_addr, ua_index, ua_str, second_field);
                 }

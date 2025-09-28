@@ -25,6 +25,8 @@ An alternative implementation could be to abstract the block-cache as another mi
 
 * You can never have an entry where there is only user-agent, or just user-agent and fine grained block combination. The broadest block that can be applied exists only on IP level.
 
+* One type of query we can make against the cache is where there are fine grained blocks associated with an Ip address and other user agents, *however there is no fine grained block associated with that ip address as a whole*.  So when we query against a *particular IP address and user agent combination that has not been explicitly mentioned in the blockfile*, we should in that case return 0. In otherwords, when there is no general fine block associated with an IP, any specific combination IP and user agent should be allowed to pass through as long as there is no explicit fine grained block associated with it.
+
 ### Data access patterns and Memory requirements :
 
 * **High reads** for ```get_blocks``` with short payloads  : 5k reads per second, 20k peak
@@ -58,9 +60,20 @@ Which implies in memory at worst it would not exceed 700MB where I assume the sp
 
 ## Solution : 
 
-The basic idea is that given the data constraints an in-memory HashMap continues to be the fastest ways `get_block` function calls can be serviced. 
+The basic idea is that given the constraints pertaining to *the volume of data* and *low latency reads* an in-memory HashMap continues to be the fastest ways `get_block` function calls can be serviced. 
 
-Also to ensure low latency of reads we have to for certain period of time maintain two data-sets within memory, the older one that is being used to service requests while the newer one is being constructed corresponding to the updated block-file( which is updated every 5 seconds) before it can be completely replace the older data.
+Expecially in context of the fact that The SipHash function used by Rust in it's HashMap implementation even with million entries can be demonstrated to have a low probability of collision.
+
+From the Birthday problem, used to calculate probability of collisions:
+
+![equation](https://latex.codecogs.com/svg.latex?P(\text{collision})%20\approx%201%20-%20e^{-\frac{n(n-1)}{2M}})
+
+
+M=64 since SipHash is 64 bit hash and for n = 1000000, we get 2.7×10−6 as the probability of collisions.
+
+The issue with HashMaps is that it does lend itself to cache locality and that can cause problems especially when the size of the data is enough to stress the capacity of memory, causing the OS to start paging, which can lead to the problem of thrashing.
+
+Secondly to ensure low latency of reads we have to for certain period of time maintain two data-sets within memory, the older one that is being used to service requests while the newer one is being constructed corresponding to the updated block-file( which is updated every 5 seconds) before it can be completely replace the older data.
 
 Which means it is very important to reduce the memory foot print both for the reasons :
 
@@ -83,22 +96,8 @@ I then construct a tuple key consisting of the unique indexes each measuring 4 b
 
 At best the worst case memory complexity is when we have utterly unique IP address and user agent combinations in every line of the block-file and memory occupied is marginally larger than what I would have had if I used a simple HashMap. But this comes with the advantage of a reduced memory foot print and performance for the average case.
 
-
-A library crate that will expose the struct BlockCache with methods, start and get_block.
-
-As soon as the method start is called, a blockfile is read into memory and 
-
-I use HashMap to represent the block file data in memory directly, The SipHash function used by Rust in it's HashMap implementation even with million entries has low probability of collisions.
-
-From the Birthday problem, used to calculate probability of collisions:
-
-![equation](https://latex.codecogs.com/svg.latex?P(\text{collision})%20\approx%201%20-%20e^{-\frac{n(n-1)}{2M}})
+It also gives minor speed improvements as within the HashMap where we store the mapping between ips, user agents and fine grained blocks, the keys are small in size and hence can be hashed faster.
 
 
-M=64 since SipHash is 64 bit hash and for n = 1000000, we get 2.7×10−6 as the probability of collisions.
-
-The only concern is lack of cache locality but it should start becoming a significant factor at sizes bigger than the one assumed now.
-
-That requires a different solution to the one presented above and I would love to implement if asked.
 
 

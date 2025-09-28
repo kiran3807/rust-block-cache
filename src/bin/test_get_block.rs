@@ -19,9 +19,10 @@ fn main() {
         ("10.0.0.2", "Python-urllib/2.6", "Combined IP + User Agent"),
         ("192.168.1.1", "Googlebot/2.1", "Combined IP + User Agent"),
         ("192.168.1.1", "curl", "Combined IP + User Agent"),
+        ("192.168.1.1", "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML", "Combined IP + User Agent"),
         ("999.999.999.999", "", "Non-existent IP"),
         ("10.0.0.1", "NonExistentUserAgent", "Existing IP but non-existent User Agent"),
-        ("192.168.1.1", "", "IP exists but no single IP entry in hashmap"),
+        ("192.168.1.1", "", "IP exists but no single IP entry in hashmap (should be anomalous)"),
     ];
     
     for (ip, user_agent, description) in test_cases {
